@@ -1,0 +1,174 @@
+/* Lab 1 */
+// Kelly Roudebush
+// CSC241
+// Dr. Fulp
+
+#include <stdio.h>
+#include <stdlib.h>
+
+// Maximum C-String size
+#define MAX_STRING_SIZE 20
+// Maximum character list size (use for alpha and numeric)
+#define MAX_LIST_SIZE 50
+
+
+struct structCharFreq	// Struct to hold character and count
+{
+	char character;
+	int count; 
+};
+typedef struct structCharFreq charFreq ;	// Alias for the struct, now declare with "charFreq"
+
+
+/*-------------------------------Function Initialization-------------------------------------------*/
+
+void readInMyFile(char * fileName, charFreq * charArray, int * charSize, charFreq* numArray, int * numSize);
+void storeStructs(char ch, charFreq * charArray, int * charSize, charFreq * numArray, int * numSize);
+void sortArray(charFreq * array, int size) ;
+void printLikeFulp(charFreq* charArray, int charSize, charFreq * numArray, int numSize);
+
+
+/*-----------------------------------Main Function-------------------------------------------------*/
+/*
+*	Main Function: Command line arguement and error checking. Array of Structs initialization (Characters and Numbers)
+*	Function calls to read in the textfile, sort the stored arrays, and print top 5 exactly like Dr. Fulp.  
+*/
+int main(int argc, char** argv)
+ {
+/*--------------------------------------Error Checking-------------------------------------------------*/
+	if (argc != 2)
+	{
+		printf("An error has occured with command line arguments") ;
+		return(-1);
+	}
+	
+	charFreq charArray[MAX_LIST_SIZE];	// Declare array of structs for letters
+	int charSize =0;			// Keep track of # of characters
+
+	charFreq numArray[MAX_LIST_SIZE] ;	// Declare array of structs for numbers 
+	int numSize =0; 			// Keep track of # of numbers
+
+	readInMyFile(argv[1], charArray, &charSize, numArray, &numSize);// For reading in the input from the file
+	sortArray(charArray, charSize);					// Sort the character array
+	sortArray(numArray, numSize);					// Sort the number array
+	printLikeFulp(charArray, charSize, numArray, numSize);		// Print exactly like Dr. Fulp
+	
+
+	return 0;
+}
+
+/*----------------------------------------Functions--------------------------------------------------*/
+/*
+*	readInMyFile: This function opens a file, reads each character until EOF, and then stores each character
+*	in the appropriate array using the passed pointers to the arrays and their sizes. 
+*/
+void readInMyFile(char* filename, charFreq *charArray, int *charSize, charFreq* numArray, int * numSize)
+{
+
+	FILE * fp; 						// Pointer to file
+			
+	fp = fopen(filename,"r+") ;			// Open the file!
+	if (fp == NULL) 					// Check if file exists			
+	{
+		printf("File could not be opened!\n");
+		exit(1);
+	}
+
+	char ch; 						// Char to hold character in question
+	do{
+		ch = fgetc(fp);					// Grab next char in file
+		storeStructs(ch, charArray, charSize, numArray, numSize); // Store each character in appropriate array
+	}while(ch != EOF) ;					// Continue until end of file
+
+	fclose(fp) ; 						// Close the file/ clean up after yourself
+}
+
+/*-----------------------------------------------------------------------------------------------------*/
+
+/*	storeStructs: This function is what sorts the character into the appropriate array by using the 
+*	predefined functions isalpha() and isdigit() to determine if a character is a letter or number. 
+*	Once the correct array is identified, it is iterated through to determine if the current "ch"
+*	has been seen before. If it has, then the count is incremented. If not, then a new space is made
+* 	and its count is initialized to 1. 
+*/
+void storeStructs(char ch, charFreq * charArray, int * charSize, charFreq * numArray, int * numSize)
+{
+	
+	int isItaLetter = isalpha(ch) ;				// Call function isalpha()
+	if(isItaLetter != 0){					// If anything but 0, it's a letter
+		ch = tolower(ch);				// Convert ch to lowercase if it already isn't
+		int i;
+		for(i=0; i<= * charSize; i++){			// Checking array to determine if ch is already there
+			if(charArray[i].character == ch){
+				charArray[i].count++;
+				return;
+			}
+		}
+		charArray[*charSize].count = 1;			// If not already there, at the current position charSize
+		charArray[*charSize].character = ch;		// increment the count to 1 and store the character
+		(*charSize)++;					// Make sure to increment the number of chars in array
+	}
+	
+
+	int isItaNumber = isdigit(ch);				// Call funtion isdigit()
+	if(isItaNumber != 0){					// Same logic as above for the array of characters
+		int k;
+		for(k=0; k<= *numSize; k++){
+			if(numArray[k].character == ch){
+				numArray[k].count++;
+				return;
+			}
+		}
+		numArray[*numSize].count = 1;
+		numArray[*numSize].character = ch;
+		(*numSize)++;
+	}
+} 
+
+/*-----------------------------------------------------------------------------------------------------*/
+
+/*
+*	sortArray: This function is a simple insertion sort that passes a pointer to the unordered array and uses 
+*	the size, or number of elements in the array to iterate through and swap when appropriate. 
+*/
+void sortArray(charFreq * array, int size)
+{
+	int i, j ;
+	charFreq temp ;						// Temp struct object to hold out of place charFreq
+	for(i = 0; i < size; i++){				// Two for loops to move through the array
+		for(j = 0; j < (size-i); j++){
+			if(array[j].count < array[j+1].count){	// Check to see if current stuct has < count than next
+				temp = array[j+1] ;		// If so, then store next [j+1] temporarily
+				array[j+1] = array[j];		// Put current into the next location
+				array[j] = temp ;		// Put next into currents old location
+			}
+		}
+	}	
+}
+
+/*------------------------------------------------------------------------------------------------------*/
+/*
+*	printLikeFulp: This funtion prints exactly what Dr. Fulp wants. Really nothing more to say about this function.
+*	Appropriate use of printf() statements and whatnot. Kind of boring actually. 
+*/
+void printLikeFulp(charFreq * charArray, int charSize, charFreq * numArray, int numSize)
+{
+
+	int h, l ;
+	printf("alpha top 5 out of %d\n", charSize);
+	printf("---------------------------------------\n");
+	
+	for (h = 0; h < 5; h++){
+		printf("[%c]", charArray[h].character) ;
+		printf("[%d]\n", charArray[h].count) ;
+	}
+
+	printf("\n");
+	printf("digit top 5 out of %d\n", numSize);
+	printf("---------------------------------------\n");
+
+	for (l = 0; l < 5; l++){
+		printf("[%c]", numArray[l].character) ;
+		printf("[%d]\n", numArray[l].count) ;
+	}
+}
