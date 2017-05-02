@@ -1,0 +1,435 @@
+/*
+* Kelly Roudebush
+* CSC241
+* Dr. Fulp
+*/
+
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>	/* for rand() and srand() */
+#include <string.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <time.h>
+#include <signal.h>
+#include <errno.h>
+#include <sched.h>
+#include <pthread.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+
+
+/* function declarations */
+void errorChecking(int argc, char* argv[] );	/* Function to check errors in command line */
+void runGroupStagger(int nDim, int nSailors, int minVisits);	/* Function to call from main to simulate groupStagger */
+void printGrid(int gridSize);		/* Function to print grid with appropriate spacing */
+void *someFunct(void *arg);		/* Function to pass through pthread create/join */
+int areWeDone(int nDim, int minVisits);	/* Function to check grid for min visits */
+void freeData(int gridSize);		/* Function to free the grid and mutex memory */
+
+/*Structure Declaration*/
+struct ThreadDataStruct{
+	char letter;
+	int curRow;
+	int curCol;
+	int gridSize;
+	unsigned int seed;
+	int minVisits;
+	int numSteps;
+};
+
+typedef struct ThreadDataStruct ThreadData;
+
+
+/* Global Variables */
+char ***grid;
+pthread_mutex_t** mutex;
+
+
+/* Input parameters: Floor dimensions (NxN), numSailors, minVisits */
+int main(int argc, char* argv[]){
+
+	int nDim, nSailors, minVisits ;	/* variable declarations here */
+	errorChecking(argc, argv);	/* code for testing command line arguments here */
+
+	nDim = atoi(argv[1]);		/* Load commandline arguments into variables */
+	nSailors = atoi(argv[2]);
+	minVisits = atoi(argv[3]);
+	
+	runGroupStagger(nDim,nSailors,minVisits);	
+
+	printGrid(nDim);
+	freeData(nDim);
+	
+	return 0;
+}
+
+
+
+/* Error checking function */
+void errorChecking(int argc, char* argv[])	/* Check your commandline for errors */
+{
+	int arg1;
+	int arg2;
+	int arg3;
+	
+	if(argc!= 4){
+		printf(" An error occured in your command line. \n");
+		printf(" Please make sure your input is in the following format: \n");
+		printf(" Executable Dimensions #Sailors Minimum#Visits \n");
+		exit(1);
+	}
+	
+	/* CHECK BOUNDS OF ARGS, DIM IS EVEN, NUMSAILORS < 52, MINVISITS > 0 */
+	arg1 = atoi(argv[1]);
+	arg2 = atoi(argv[2]);
+	arg3 = atoi(argv[3]);
+	
+	if (arg1 % 2 || arg1 < 2){
+		printf ("First argument is not even or greater than 0. Grid needs to be divisible by two. \n");
+		exit(1);
+	}
+	if (arg2 > 52 || arg2 < 0){
+		printf ("Second argument is not b/w 0 and 52. You can't ask for that many Sailors\n");
+		exit(1);
+	}
+	if (arg3 < 0){
+		printf ("You can't have a negative number for minimum visits. \n");
+		exit(1);
+	}
+	return;
+}
+
+
+
+void runGroupStagger(int nDim, int nSailors, int minVisits){
+	int i,j,l,h,k, curLetter, totalSteps;
+	unsigned int seed = 10;
+	int mSize = (nDim*nDim)/4;
+	pthread_t *thread;
+	ThreadData *thdData;
+	
+	printf("\n");
+	printf("Floor is a %d by %d, there are %d sailors, and min visits is %d\n", nDim, nDim, nSailors, minVisits);
+	printf("\n");
+	
+	/* Allocate grid */
+	grid = (char***)malloc(nDim*sizeof(char**));
+	for(i = 0; i < nDim; i++){
+	
+		grid[i] = (char**)malloc(nDim*sizeof(char*));
+		/* Initialize every pointer to NULL */
+		for(j = 0; j < nDim; j++){
+			grid[i][j] = NULL;
+		}
+	}
+	
+	/* Allocate mutexes */
+	mutex = (pthread_mutex_t**)malloc(mSize*sizeof(pthread_mutex_t*));
+	for(l = 0; l < mSize;l++){
+		mutex[l] = (pthread_mutex_t*)malloc(mSize*sizeof(pthread_mutex_t));
+		for(h = 0; h < mSize; h++){
+			pthread_mutex_init((&mutex[l][h]),NULL);
+		}
+	}
+
+	/* Allocate space for threads, nSailor number of threads of size pthread */
+	thread = (pthread_t*) malloc(nSailors* sizeof(pthread_t)); 
+	
+	/* Allocate space for data structs (4 ints and 1 char in each struct) */
+	thdData = (ThreadData*) malloc(nSailors*(sizeof(ThreadData) ) );
+
+	/* Assign input vals to struct features */
+	curLetter = 65;	/* Start at 'A' in ASCII vals */
+	for(i = 0; i < nSailors; i++){
+		if(i == 91){
+			i = 97;	/* Change from 'A-Z' to 'a-z' */
+		}	
+		
+		thdData[i].letter = (char) curLetter;
+		thdData[i].curRow = rand_r(&seed)%nDim;		/* seed and determine SAFE rand vals for position */
+		thdData[i].curCol = rand_r(&seed)%nDim;
+		thdData[i].seed = seed;
+		thdData[i].gridSize = nDim;
+		thdData[i].minVisits = minVisits;
+		thdData[i].numSteps = 0; 	
+		seed = seed + 10;
+		curLetter++;
+		
+	}
+	
+	
+
+	/* Create the threads */
+	for (i = 0; i < nSailors ; i++){
+		
+		pthread_create(&(thread[i]), NULL, someFunct, &(thdData[i]));
+	}
+	
+	/* pthread join, call function using struct */
+	for( i = 0; i < nSailors ; i++){
+		pthread_join(thread[i], NULL);
+	}
+ 
+	/* Find and print steps */
+	totalSteps = 0;
+	for(k= 0; k < nSailors; k++){
+		printf("Sailor %c takes %i Steps\n", thdData[k].letter, thdData[k].numSteps);
+		totalSteps = totalSteps + thdData[k].numSteps;
+	}
+	printf("Total number of steps taken %i\n", totalSteps);
+	printf("\n");
+	printf("\n");
+}
+
+
+
+
+
+void *someFunct(void * arg){
+
+
+	/* Pass in data struct */
+	ThreadData thdData = *((ThreadData *) arg);
+	
+
+	/* Deconstruct data from struct, save locally */
+	char letter = thdData.letter;
+	int curRow = thdData.curRow;
+	int curCol = thdData.curCol;
+	int gridSize = thdData.gridSize;
+	int minVisits = thdData.minVisits;
+	int numSteps = thdData.numSteps;
+
+	
+	/* Variable declarations */
+	int flag = 1;	/* To keep track if we are done or no, 0 means done, 1 means not done */
+	int randRow = 0;
+	int randCol = 0;
+
+	char* tempLetter = NULL;
+	char* tempOld = NULL;
+		
+	/* Allocate space for letter at Starting tile */
+	grid[curRow][curCol] = (char*)malloc(sizeof(char)*2);	/* Alloc space in string on grid for letter and '\0' */
+	tempLetter = (char*)malloc(sizeof(char)*2);		/* Alloc space in temp starting letter to store letter & '\0' */
+	*tempLetter = letter;					/* point at letter */
+		
+   	grid[curRow][curCol][0] = letter;  
+   	grid[curRow][curCol][1] = '\0';
+   	
+	/* append the startLetter with '\0' */
+	tempLetter[strlen(tempLetter)+1] = '\0';				
+
+	/* simulate the stagger here */
+	while(flag == 1){	/* While still work to do */
+		
+		/* While the possible rand values both = 0 (Illegal move), Find legal move */
+		while(randRow == 0 && randCol == 0 ){	
+			
+			randRow = rand() % 3;		/* Compute a possible rand value */
+			randCol = rand() % 3;
+		}
+		/*If you get here, you have a legal move. (Row && Col != 0 )*/
+				
+		switch(randRow){			/* Switch cases */
+			case 0:				
+				randRow = 0 ;		/* If possible is 0, then randRow is 0*/
+				break;
+			case 1:
+				randRow = -1;		/* If possible is 1, then randRow is -1*/
+				break;
+			case 2:	
+				randRow = 1;		/* If possible is 2, then randRow is 1*/
+				break;
+		}
+		switch(randCol){
+			case 0:
+				randCol = 0 ;		/* If possible is 0, then randCol is 0*/
+				break;
+			case 1:
+				randCol = -1;		/* If possible is 1, then randRow is -1*/
+				break;
+			case 2:	
+				randCol = 1;		/* If possible is 2, then randRow is 1*/
+				break;
+		}
+		
+
+			
+		curRow = ((curRow + randRow)%gridSize);	/* add thes random steps to the current place */
+		curCol = ((curCol + randCol)%gridSize);
+		
+		
+		if( curRow  < 0 ){
+			curRow = curRow + gridSize ;
+
+		}
+		
+		if( curCol  < 0 ){
+			curCol = curCol + gridSize ;
+
+		}
+		/* If here, then ideally, we are at new tile and need to add letter to tile*/
+		
+		/* Check if C string has vals already */ 
+		if(grid[curRow][curCol] == NULL){
+						
+			/* LOCK */
+			pthread_mutex_lock(&mutex[curRow/2][curCol/2]);
+			
+			/* UPDATE */	
+			
+			/* if no, allocate space, put letter in string */
+			grid[curRow][curCol] = (char*)malloc(sizeof(char)*2);    /* Alloc space in string on grid 4 letter & '\0' */
+   			grid[curRow][curCol][0] = letter;  
+   			grid[curRow][curCol][1] = '\0';
+   			
+ 			/* UNLOCK */  			
+			pthread_mutex_unlock(&mutex[curRow/2][curCol/2]);									
+
+			/* SLEEP */
+			usleep(1);
+			sched_yield();
+			
+			/* CHECK */
+			flag = areWeDone(gridSize, minVisits);
+
+	
+		}else{
+
+			/* LOCK */
+			pthread_mutex_lock(&mutex[curRow/2][curCol/2]);
+			
+			/* UPDATE */
+			
+			/* allocate enough space for existing string and two more characters */  
+			tempOld = (char *) malloc( sizeof(char) * ( strlen(grid[curRow][curCol]) + 2) ); 
+			
+			/* copy over existing string */  
+			strcpy(tempOld, grid[curRow][curCol]);  
+			
+			/* add new letter to end of string */ 
+			tempOld[strlen(grid[curRow][curCol])] = *tempLetter;
+			
+			/* add '\0' to end of string */  
+			tempOld[strlen(grid[curRow][curCol]) + 1] = '\0';
+						
+			/* erase old string */  
+			free(grid[curRow][curCol]);  
+			
+			/* point to new string, and all is done... */  
+			grid[curRow][curCol] = tempOld;  
+				
+ 			/* UNLOCK */  			
+			pthread_mutex_unlock(&mutex[curRow/2][curCol/2]);	
+			
+			/* SLEEP */
+			usleep(1);
+			sched_yield();
+			
+			/* CHECK */
+			flag = areWeDone(gridSize, minVisits);
+
+		}
+
+
+		randRow = 0;	/* set rand steps back to 0 */
+		randCol = 0;
+		numSteps++;	/* increment number of steps */
+		
+	}
+
+	thdData.numSteps = numSteps;	/* Save numSteps in struct */
+	*((ThreadData *) arg) = thdData;/* Pass struct back */
+	
+	return NULL ;
+}
+
+/* Function to print the Grid */
+void printGrid(int gridSize){
+	int i,j,k;
+	int max = 0;
+	char* temp = NULL;
+
+	/* Find the longest string */
+	for(i = 0; i < gridSize; i++){
+		for(j = 0; j < gridSize; j++){
+			if (strlen(grid[i][j]) > max) {
+				max = strlen(grid[i][j]);
+			}
+		}
+	}
+
+	for(i = 0; i < gridSize; i++){
+		for(j = 0; j < gridSize; j++){
+			temp = NULL;
+			if (strlen(grid[i][j]) >= max) {	/* Print max length string(s) */
+				printf("[%s]", grid[i][j]);
+			}
+			else{
+				temp = (char*) malloc( (max + 1) *sizeof(char)); /* Allocate temp to max size */
+				strcpy(temp, grid[i][j]);	/* Copy existing string into temp */
+				for(k = strlen(grid[i][j]); k < max ; k++){	/* Start at end of existing string */
+					temp[k] = ' ';		/* Make every space ' ' after string to max string length */
+				}
+				printf("[%s]", temp);	/* print out the string */
+				free(temp);		/* Free the temp */
+			}
+		}
+		printf("\n");
+	}
+}
+/* Function to check if all tiles have been visited the minimum number of times */
+int areWeDone(int nDim, int minVisits){
+	/* Write a clever check for the grid */
+	int i, j, result;
+	
+	result = 0; /* 0 means that We Are Done! 1 means We Are NOT Done */
+	
+	/* Iterate through grid */
+	for(i = 0; i < nDim; i ++){
+		for(j= 0; j < nDim;j++){
+		
+			/* LOCK [i/2][j/2] */
+			pthread_mutex_lock(&mutex[i/2][j/2]);
+			
+		 	/* if anywhere is NULL GET OUT! */
+		 	if(grid[i][j] == NULL){
+		 		result = 1;
+		 		/* UNLOCK */
+				pthread_mutex_unlock(&mutex[i/2][j/2]);	
+		 		return result;
+		 	}
+			/* If strlen(grid[i][j]) < minVisits, GET OUT */
+			if( (strlen(grid[i][j])) < minVisits){
+				result = 1;
+				/* UNLOCK */
+				pthread_mutex_unlock(&mutex[i/2][j/2]);	
+				return result;		
+			}
+				/* UNLOCK */
+				pthread_mutex_unlock(&mutex[i/2][j/2]);	
+		}
+	}
+	/* If you get here, then done! and return 0 */
+	return result;
+}
+
+/* Function to clean up the memory used */	
+void freeData(int gridSize){
+	int i, j;
+	
+	for(i = 0; i < gridSize; i++){
+		free(grid[i]);
+		for(j = 0; j < gridSize; j++){
+		}
+	}
+	free(grid);
+	for(i = 0; i < (gridSize/2); i++){
+		free(mutex[i]);
+		for(j = 0; j < (gridSize/2); j++){
+		}
+	}
+	free(mutex);
+}
