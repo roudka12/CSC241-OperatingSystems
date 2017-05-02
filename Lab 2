@@ -1,0 +1,207 @@
+// Lab2 
+// Kelly Roudebush
+// Dr. Fulp
+// CSC241
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>  
+#include <ctype.h>  
+
+#define MAX_STRING 128  
+
+struct StructWordFreq	/* Struct to hold word and count */
+{
+	char *word;
+	int count; 
+};
+typedef struct StructWordFreq WordFreq ;	/* Alias for the struct, now declare with "WordFreq" */
+
+
+void processFile(char* filename, WordFreq **arrayWordFreq, int *num_structs);
+void storeStructs( WordFreq **arrayWordFreq, int *num_structs, char* string, int *num_chars);
+int search(char* word, WordFreq *list, int num);  
+void errorChecking(int argc);
+void sortArray(WordFreq** arrayWordFreq, int *num_structs);
+void printOutput(WordFreq **arrayWordFreq, int *num_structs);
+
+/* -----------------------------------------------Main()---------------------------------------------------------*/
+int main(int argc, char** argv)
+ {
+	errorChecking(argc);	/* Error Checking*/
+	WordFreq * list; 	/* Pointer to Array of WordFreq structs */
+	int num_structs;	/* Variable to keep track of the number of structs in the array */
+	
+	list = 0;		/* Start list at 0 */
+	num_structs = 0;	/* Start counter at 0 */
+	
+	processFile(argv[1], &list, &num_structs);	/* Function call to process the txt file. */
+        
+        sortArray(&list, &num_structs);
+        printOutput(&list, &num_structs);  
+        
+
+
+	return 0;
+}
+/* -----------------------------------------------Functions()---------------------------------------------------------*/
+
+/*
+*	Output the file, and print to console the num_structs.
+*/
+void printOutput(WordFreq **arrayWordFreq, int *num_structs){
+	int i;
+	FILE *fp2 = fopen("roll.frq", "w");
+	WordFreq temp;
+	
+	if (fp2 == NULL) {
+	    printf("ERROR: roll.frq could not be created!\n");
+	    exit(1);
+	}
+
+	for(i = 0; i < ((*num_structs)+1); i++){
+		temp = (*arrayWordFreq)[i];
+		fprintf(fp2, "%s %i\n", temp.word, temp.count);
+	}
+	printf ("roll.txt has %i unique words\n", ((*num_structs)+1));
+	printf ("-------------------------------\r\n");
+	printf ("Creating roll.frq ... done!\r\n");
+	fclose(fp2);
+	return;
+}
+
+/*
+*	Function to Sort Array in descending order based off of WordFreq.count
+*/
+void sortArray(WordFreq** arrayWordFreq, int * num_structs){
+	
+	int i, j;
+	WordFreq temp;
+	
+	for(i=0; i < (*num_structs); i++){
+		for(j= 0; j < (*num_structs) - i; j++){
+			if((*arrayWordFreq)[j].count < (*arrayWordFreq)[j+1].count){
+				temp = (*arrayWordFreq)[j+1];
+				(*arrayWordFreq)[j+1] = (*arrayWordFreq)[j];
+				(*arrayWordFreq)[j] = temp;
+			}
+		}
+	}
+			
+
+}
+
+/*
+*	Function to process the file
+*/
+void processFile(char* filename, WordFreq **arrayWordFreq, int *num_structs){
+
+
+	FILE * fp; 				/* Pointer to file*/
+			
+	fp = fopen(filename,"r+") ;		/* Open the file!*/
+	if (fp == NULL) 			/* Check if file exists	*/		
+	{
+		printf("File could not be opened! Please check that the file name was spelled correctly\n");
+		exit(1);
+	}
+
+
+	char ch; 				/* Char to hold character in question */
+	int num_chars = 0;			/* Start at 0 cause nothing is there yet*/
+
+
+	char string[MAX_STRING];		/* Allocate space for string to hold chars*/
+	while( (ch = fgetc(fp)) != EOF){
+		if(isalpha(ch)){		/* If it is a character */
+			ch = tolower(ch);	/* Change to lowercase */
+			string[num_chars] = ch;	/* Store ch in string */
+			num_chars++;		/* Increment num_chars */
+		}	
+		else{				/* If it's not a character */
+			string[num_chars] = '\0';
+			storeStructs(arrayWordFreq, num_structs, string, &num_chars); /* Store string as WordFreq struct*/
+			string[0] = '\0'; 	/* Reset string char array to be a zero length c-strin */
+			num_chars = 0;		/* Set num_char counter back to 0 */
+			
+		}
+	}
+	fclose(fp) ; 				/* Close the file/ clean up after yourself */
+}
+
+
+/*
+*	Function to store the word in string[] in the arrayWordFreq. Handles case of nothing in list.
+*/
+void storeStructs(WordFreq **arrayWordFreq, int *num_structs, char* string, int *num_chars){
+
+        WordFreq *temp;  			/* Temp WordFreq Array to hold copy later*/
+        int loc = -1;  				/* Location set to -1 */					
+        loc = search(string, *arrayWordFreq, *num_structs);  	/* Look for that word in the array */
+
+        if(loc >= 0)	        /* if it already exists, let's increment the counter  */
+        {  
+		(*arrayWordFreq)[loc].count++;  		/* Increment count at the location of the found word */
+                (*num_chars) = 0; 				/* Set num_chars back to 0 */
+        }  
+        else  
+        {  		
+		if((*num_structs) == 0){			/* For the case where nothing is in the arrayWordFreq */
+			temp = (WordFreq *) malloc(sizeof(WordFreq));	/* allocate space for the first element */
+
+			temp[0].word = (char*) malloc(strlen(string)-1);/* allocate space at temp[0].word */
+			strcpy(temp[0].word, string); 			/* copy string into temp */
+			temp[0].count = 1; 				/* Increment counter */
+			*arrayWordFreq = temp ; 			/* Set arrayWordFreq to now point to temp */
+			(*num_structs) += 1;				/* Increment number of structs */
+		}
+		else{
+			temp = (WordFreq *) malloc(sizeof(WordFreq)*((*num_structs)+1));/* reallocate string and add in new char character to string */
+		        
+			memcpy(temp, *arrayWordFreq, sizeof(WordFreq)*(*num_structs) );	/* copy over the old to temp */
+		        temp[*num_structs].word = (char *) malloc(sizeof(char)*(strlen(string) + 1 ));  /* allocate space for the new word and copy */
+		        
+		        strcpy(temp[*num_structs].word, string);  	/* Copy the  string into the .word area of the struct */
+		        temp[*num_structs].count = 1;  			/* Make count = 1 */
+			
+		        (*num_structs)++;  				/* increment num_structs*/
+	 			
+		        if(*arrayWordFreq) free(*arrayWordFreq);  	/* Free the old array THIS IS THE ISSUE */
+		        *arrayWordFreq = temp;				/* Point arrayWordFreq at temp*/
+		
+		}
+                 
+        }  
+}
+
+/* 
+*	write a simple linear search and return loc to the index if found
+*/
+int search(char *word, WordFreq *list, int num)  
+{
+
+	int loc = -1;  
+	int i;
+	for(i= 0; i< num; i++){
+		if(list == NULL){
+			printf("There is nothing here yet\n") ;
+			return loc;		
+		}
+		else if(strcmp(list[i].word,word)== 0){
+			loc = i;
+		}
+	}	
+   return loc;
+}  
+
+void errorChecking(int argc){
+	if (argc != 3)		// Argument Checking
+	{
+		printf("An error has occured with command line arguments\n") ;
+		printf("Please enter the text file name you would like to read from followed by a space\n");
+		printf("Then enter the name of the text file you would like to write to\n");
+		return;
+	}
+
+}
