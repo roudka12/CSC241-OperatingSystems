@@ -1,0 +1,367 @@
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>	/* for rand() and srand() */
+#include <string.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <time.h>
+#include <signal.h>
+#include <errno.h>
+#include <sched.h>
+#include <pthread.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+
+
+/* Student Struct */
+
+struct StudentStruct{
+	
+	char letter;		/* To identify student */
+	unsigned int seed;	/* Seed to chose rand questionTime */
+	int numStudents;	/* Total number of students */ 
+	int maxArrTime;		/* Maximum Time to Arrive */
+	int maxQuestTime;	/* Maximum Time to ask Question */
+	int totalSeats;		/* Total number of seats available outside */
+	};
+
+typedef struct StudentStruct Student;
+
+
+
+/* Global variables */
+pthread_mutex_t curLetterMutex;	/* Mutex */
+pthread_mutex_t seatsMutex;	/* Mutex */
+pthread_mutex_t mutex3;
+pthread_mutex_t mutex4;		/* Mutex */
+pthread_mutex_t wakeMutex;
+pthread_mutex_t knowMutex;
+pthread_mutex_t	helpMutex;
+
+pthread_cond_t studentAvail;	/* Condition variable, is there a student available */
+
+pthread_cond_t spaceAvail;	/* Condition variable, is there space in the office for student */
+pthread_cond_t wakeUp;
+pthread_cond_t helpCond;
+
+pthread_cond_t knowCond;
+
+char CurStudentLetter;       	/* To hold letter of current student asking question */
+
+int numSeatsAvail;
+int studentsProcessed;
+int knowReady;
+int helpReady;
+
+/* Function decalrations */
+void runOfficeHours(int numStudents, int maxArrTime, int maxQuestTime, int totalSeats);
+void *student(void* arg);
+void *ta(void* arg);
+void errorChecking(int argc, char* argv[]);void P(int numSeatsAvail);
+
+
+
+int main(int argc,char* argv[]){
+/* Create threads and other stuff */
+	
+	int numStudents;	/* Variables to hold commandline args */
+	int maxArrTime;
+	int maxQuestTime;
+	int totalSeats;
+	
+	CurStudentLetter = '?';	/* Initialize CurStudentLetter to '?' */
+
+	errorChecking(argc, argv);	/* Error Checking */
+	
+	numStudents = atoi(argv[1]);	/* Set to commandline args */
+	numSeatsAvail = atoi(argv[2]);
+	maxArrTime = atof(argv[3]);
+	maxQuestTime = atof(argv[4]);
+	totalSeats = numSeatsAvail;
+	studentsProcessed = 0;
+
+	printf("nStudents: %i, numSeats: %i, maxArrTime: %i msecs, maxQuestTime: %i msecs \n", numStudents,numSeatsAvail, maxArrTime, maxQuestTime);
+
+	runOfficeHours(numStudents, maxArrTime, maxQuestTime, totalSeats);
+		
+	return 0;
+}
+
+void runOfficeHours(int numStudents, int maxArrTime, int maxQuestTime, int totalSeats){
+
+	int i, curLetter;	/* Variable declarations */
+	pthread_t *thread;
+	Student *thdData;
+	unsigned int seed = 10; /* For Seed initialization */
+	
+	pthread_mutex_init(&curLetterMutex, NULL);	/* Initialize mutex and condition variables */
+	pthread_mutex_init(&seatsMutex, NULL);	
+	pthread_mutex_init(&mutex3, NULL);
+	pthread_mutex_init(&mutex4, NULL);		
+	pthread_mutex_init(&wakeMutex, NULL);			
+	pthread_mutex_init(&helpMutex, NULL);				
+	pthread_mutex_init(&knowMutex, NULL);				
+		
+	pthread_cond_init(&studentAvail, NULL);
+	pthread_cond_init(&spaceAvail,NULL);
+	pthread_cond_init(&wakeUp,NULL);
+	
+	/* Allocate space for threads, nStudent number of threads of size pthread */
+	thread = (pthread_t*)malloc((numStudents + 1) * sizeof(pthread_t)); 
+	
+	/* Allocate space for student structs with 1 extra for "Fake Student" aka TA */
+	thdData = (Student*)malloc((numStudents + 1) * (sizeof( Student ) ) );
+
+
+	/* Creating each student struct and assigning data */
+	curLetter = 65;	/* Start at 'A' in ASCII vals */
+	for(i = 0; i < numStudents + 1; i++){
+		if(i == 91){
+			curLetter = 97;	/* Change from 'A-Z' to 'a-z' */
+		}
+		thdData[i].letter = (char) curLetter;
+		thdData[i].seed = seed;
+		
+		/* Pass in commandline args */
+		thdData[i].numStudents = numStudents;
+		thdData[i].maxArrTime = maxArrTime;
+		thdData[i].maxQuestTime = maxQuestTime;
+		thdData[i].totalSeats = totalSeats;
+		
+		seed = seed + 10;	/* Increment seed and curLetter */
+		curLetter++;
+	}
+
+	/* create fake student thread ( from end of list ) aka TA here */
+	pthread_create(&(thread[numStudents]), NULL, ta, &(thdData[numStudents]));
+	
+	/* Create the real student threads */
+	for (i = 0; i < numStudents ; i++){
+		pthread_create(&(thread[i]), NULL, student, &(thdData[i]));
+	}
+	
+	
+	/* pthread join, call function using struct: CHECK TO MAKE SURE FAKE STUDENT CAN JOIN */
+	for( i = 0; i < (numStudents + 1) ; i++){
+		pthread_join(thread[i], NULL);
+	}
+	
+	/* free data here */
+	free(thread);
+	free(thdData);
+}
+
+
+void *student(void *arg){
+
+	unsigned delayAmount;	/* amount to delay */
+	char questMark = '?';	/* For comparing to CurStudentLetter */
+	
+	/* unMarshalling */
+	Student thdData = *((Student *) arg);
+
+	/* delay a bit before officially arriving */
+	delayAmount = rand_r(&thdData.seed)%(thdData.maxArrTime) + 1;
+	sched_yield();
+	usleep(delayAmount);
+	printf("[ARRV] student %c arrives to office hours [ARRV] \n", thdData.letter);
+	fflush(stdout);
+	
+
+	
+	/* Lock, Signal TA to Wake up as a student arrives, Unlock */
+	pthread_mutex_lock(&wakeMutex);
+	pthread_cond_signal(&wakeUp);
+	pthread_mutex_lock(&wakeMutex);
+	printf("Got past signaling wake \n" );
+	
+	/* Lock to check seatsAvail */
+	pthread_mutex_lock(&seatsMutex);
+	/* If no seats */
+	if(numSeatsAvail == 0){
+		studentsProcessed++;	/* Keep track of angry student for total students processed */	
+		printf("[ANGR] student %c leaves angry, no seats available [ANGR]\n", thdData.letter);
+		/* UNLOCK  */
+		pthread_mutex_unlock(&seatsMutex);	
+		return 0;
+	}
+	/* Getting here means a seat available to sit in */
+	numSeatsAvail--;
+	pthread_mutex_unlock(&seatsMutex);	
+
+	
+	
+	/* Lock Mutex */
+	pthread_mutex_lock(&curLetterMutex);
+	/* If ta is busy then wait for help */
+	while( CurStudentLetter != questMark){ /* Another student is asking question */
+		printf("[WAIT] student %c patiently waits [WAIT] \n", thdData.letter);
+		/* condition wait: wait on space to be available in the office */
+		pthread_cond_wait(&spaceAvail, &curLetterMutex);
+	}
+	/* At this point, TA says you can ask question */
+	CurStudentLetter = thdData.letter ;
+	/* Condition signal: Signal that student available */
+	pthread_cond_signal(&studentAvail);
+
+
+        /* BLOCK UNTIL THE PROF DOES THE FIND */
+	pthread_mutex_lock(&helpMutex);	
+	if(!helpReady){
+		pthread_cond_wait(&helpCond, &helpMutex);
+	}
+	helpReady = 0;
+	pthread_mutex_unlock(&helpMutex);
+        /* SOMETHING LIKE THE ABOVE */  
+	
+	/* Print helping */
+	printf("[HELP] student %c asks a question [HELP] \n", thdData.letter);
+	/* UNLOCK mutex */
+	pthread_mutex_unlock(&curLetterMutex);
+	
+	
+	/* delay a bit to simulate help */
+	delayAmount = rand_r(&thdData.seed)%(thdData.maxQuestTime) + 1;	/* Question delay */
+	sched_yield();
+	usleep(delayAmount);
+
+
+        /* SIGNAL THE PROFESSOR THAT YOU ARE GOOD */
+        printf("[GOOD] student %c leaces happy, knowledge obtrianed [GOOD]\n",thdData.letter);  
+	pthread_mutex_lock(&knowMutex);
+	pthread_cond_signal(&knowCond);
+	knowReady = 1;
+	pthread_mutex_unlock(&knowMutex);
+        /* SOMETHING LIKE THE ABOVE */  
+	
+	return NULL;
+}
+
+
+
+void *ta(void *arg){
+
+	int numStudentsSeen;	/* Local variable to check against totalStudents */
+	int totalSeats;		/* Variable to keep track of total seats */
+	char questMark = '?';	/* For comparing to CurStudentLetter */
+	int studentsWaiting;	/* Variable to hold num students waiting */
+	
+	/* unMarshalling */
+	Student thdData = *((Student *) arg);
+	
+	numStudentsSeen = 0;	/* The number of students that have arrived */
+	totalSeats = thdData.totalSeats;
+	studentsWaiting = 0;
+	
+	
+	/* keep TAing until all students have arrived */
+	while(studentsProcessed < thdData.numStudents){	
+  
+		pthread_mutex_lock(&seatsMutex);
+		printf("NumSeats Avail is %i \n", numSeatsAvail);
+		if(numSeatsAvail == totalSeats){
+			//printf("NumSeats Avail now is %i\n", numSeatsAvail);
+			printf("<NAP!> Prof finds no students waiting and takes a nap <NAP!> \n", CurStudentLetter);		
+			while(numSeatsAvail == totalSeats){
+			//printf("<NAP!> Prof finds no students waiting and takes a nap <NAP!> \n", CurStudentLetter);		
+				/* Take a nap, wake when student arrives */
+				pthread_cond_wait(&wakeUp, &wakeMutex);
+		
+			}
+		}	
+		
+		/* CHANGED BELOW */  
+		/* At this point prof has been woken and yawns */
+		printf("<YAWN> prof awakes, ready for action <YAWN> \n");	
+		/* Find number of students waiting */
+		
+		studentsWaiting = totalSeats - numSeatsAvail;
+		/* UNLOCK  */
+		pthread_mutex_unlock(&seatsMutex);
+
+		/* Print findings */
+		printf("<FIND> prof finds %d students waiting <FIND> \n", studentsWaiting);		
+		/* NEED TO SIGNAL THE STUDENT TO GO AHEAD AND ASK QUESTION */
+		pthread_mutex_lock(&helpMutex);
+		helpReady = 1;
+		pthread_cond_signal(&helpCond);
+		pthread_mutex_unlock(&helpMutex);
+
+		/* NEED TO BLOCK UNTIL THE STUDENT DOES [GOOD] */  
+		pthread_mutex_lock(&knowMutex);
+		if(!knowReady){
+			pthread_cond_wait(&knowCond, &knowMutex);
+		}
+		knowReady = 0;
+		pthread_mutex_unlock(&knowMutex);
+                /* SOMETHING LIKE THE ABOVE */  
+		
+		/* Print dropping knowledge */
+		printf("<KNOW> TA dropped knowledge on %c <KNOW> \n", CurStudentLetter);		
+		
+		/* Update letter after help */
+		CurStudentLetter = '?';
+		
+		/* Condition Signal to students that someone can come in and ask question */
+		pthread_cond_signal(&spaceAvail);
+	
+		/* Update students processed */
+		studentsProcessed++;
+		
+		/* Increment numSeatsAvail */
+		numSeatsAvail++;
+		
+		/* UNLOCK */
+		/* pthread_mutex_unlock(&mutex); */
+	
+		
+	}
+	printf("<FIN> TA done, going home...<FIN> \n");
+	fflush(stdout);
+	
+	return NULL;
+
+}
+
+
+void errorChecking(int argc, char* argv[]){
+
+	int arg1;
+	int arg2;
+	int arg3;
+	int arg4; 
+	
+	if(argc != 5){
+		printf("There is an error in the commandline! Make sure arguments are: \n");
+		printf("executable numStudents numSeats maxArriveTime maxQuestTime \n");
+		exit(-1);
+	}
+	
+	/* CHECK BOUNDS OF ARGS */
+	arg1 = atoi(argv[1]);	/* numStudents */
+	arg2 = atoi(argv[2]);	/* numSeats */
+	arg3 = atoi(argv[3]);	/* maxArriveTime*/
+	arg4 = atoi(argv[4]);	/* maxQuestTime */
+		
+	if(arg1 <= 0 || arg1 > 52 ){
+		printf("You can't have negative/no students looking for help nor can you have more than 52 \n");
+		exit(-2);
+	}
+	
+	if(arg2 <= 0){
+		printf("You can't have a negative or no seats \n");
+		exit(-2);
+	}
+	
+	if(arg3 <= 0){
+		printf("You can't have a negative Max Arrival Time \n");
+		exit(-2);
+	}
+	
+	if(arg4 <= 0){
+		printf("You can't have a negative Max Question Time  \n");
+		exit(-2);
+	}
+	return;
+	
+}
