@@ -1,0 +1,231 @@
+/*
+* Kelly Roudebush
+* CSC 241
+* Lab 5
+*/
+
+#include <stdio.h>
+#include <stdlib.h>	
+#include <string.h>
+#include <unistd.h>
+#include <ctype.h>
+#include <time.h>
+#include <signal.h>
+#include <errno.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+
+
+#define MAX_LINE 128
+#define MAX_ARGS 10
+
+/* Function Declarations */
+void errorChecking(int argc);
+void handlerChecking(struct sigaction action);
+void childHandler(int signal);
+void doTheBish();
+
+int main(int argc, char * argv[])
+{
+	/*** WAIT ON CHILD IN FOREGROUND */
+	/*** DO NOT WAIT ON CHILD IN BACKGROUND */
+	
+	/* Child Handler */
+	struct sigaction action;
+	action.sa_handler = childHandler;
+	sigemptyset(&action.sa_mask);
+	/* restart flag */
+	action.sa_flags = SA_RESTART;
+	
+	/* Check arguments */
+	errorChecking(argc);
+	
+	/* Check handler */
+	handlerChecking(action);
+	
+	while(1){
+		/* ADD work */
+		/* Add code from CheckPoint2 */
+		/* Fork here */
+		doTheBish();
+	}
+	return 0;
+}
+/* Function to error check command line */
+void errorChecking(int argc){
+
+	if(argc != 1){
+		printf("Too many arguments \n");
+		exit(1);
+	}
+	return;
+}
+/* Function to check the handler */
+void handlerChecking(struct sigaction action){
+
+	/* Check handler to make sure handler was set correct */
+	if (sigaction(SIGCHLD, &action, 0) == -1) {
+		perror(0);
+		exit(1);
+	}
+}
+/* Function to handle child */
+void childHandler(int signal){
+
+	/* waitpid(pid_t pid, int *status-ptr, int options) */
+	/* WNOHANG flag to indicate that the parent process shouldn’t wait */
+	waitpid(-1,0,WNOHANG > 0);
+	
+	/* Will return 0 instead of blocking */
+}
+
+/* Function with the work */
+void doTheBish(){
+	
+	/* Variables to keep track of Processes */
+	pid_t pid;
+	pid_t wait_pid;
+	
+	/* Variables to store CommandLine input and commandArgs */
+	char line[MAX_LINE];
+	char *commandArgs[MAX_ARGS];
+	
+	/* Index, number of Arguments, Status variables */
+	int i;
+	int numArgs;
+	int status;
+	
+	/* Length of the string, binary flag for &, variable to keep track of & index */
+	int strLength;
+	int isThereAnAnd;
+	int andIndex;
+	
+	/* string pointer, and pointer */
+	char *sPtr;
+	char *andCheck;
+	
+/* ----------------- Initialize everything to NULL/'\0' -----------------------*/	
+	/* For loop to reset commandArgs all to NULL */
+	for(i = 0; i < MAX_ARGS; i++){
+		commandArgs[i] = NULL;
+	}
+	/* Make the input line empty */
+	memset(line, '\0',MAX_LINE);
+	
+/*---------------------Prompt User---------------------------------------------*/
+		
+	printf("Bish:$ ");
+	fflush(stdout);
+		
+	/* read from commandline */
+	fgets(line, MAX_LINE - 1, stdin);
+	
+/*---------------------Remove NewLine Character--------------------------------*/
+
+	strLength = strlen(line);
+	/* printf(strLength); */
+	if( line[strLength-1] == '\n' && strLength >0 ){
+		line[strLength-1] = '\0';
+	}	
+/*---------------------Remove & Here-------------------------------------------*/
+
+	isThereAnAnd = 0; /* No & yet */
+	andIndex = -1; /* make index -1 for now */
+	/* Search for & in line, and replace */
+	andCheck = strchr(line, '&');
+	if(andCheck != NULL){
+		isThereAnAnd = 1; /* There is an & */
+		andIndex = (int)(andCheck - line);
+		line[andIndex] = '\0';
+	}
+
+/*-------------------EXIT IF "QUIT"-------------------------------------------*/
+
+	/* Exit if input is "quit" */
+	if ( (strcmp(line, "quit") == 0) || (strcmp(line, "quit\n") == 0) ){
+			exit(0);
+	}
+		
+/*--------------------Parsing and Storing--------------------------------------*/
+	
+	/* parse line, add '\0' where " " */
+	i = 0;
+	numArgs = 0;
+	sPtr = strtok(line, " ");
+				 
+	/* copy into commandArgs[] DYNAMICALLY */
+	commandArgs[i] = strdup(sPtr);
+	numArgs++;
+		
+	/* While you have something to point at */
+	while(sPtr != NULL){
+		/* "keep searching for c-string" */
+		sPtr = strtok(NULL, " ");
+		if(sPtr == NULL){
+			break;
+		}
+	/* Place each piece in commandArgs[] */
+	/* ++i because already value in commandArgs[i] */
+	commandArgs[++i] = strdup(sPtr);
+	numArgs++;
+	}
+	
+	/*
+	for (i = 0; i < numArgs; i++){
+		printf("%s \n", commandArgs[i]);
+	}*/
+	
+/*-----------------------Forking----------------------------------------------*/
+
+	/* Fork the process */
+	pid = fork();
+	/* Check the three cases, Child, Parent, Error */
+	if(pid == 0){
+		/* Child Process */
+		/*printf("I am the Child with PID %d\n", getpid() ); */
+		/*printf("My Parent's PID is %d\n", getppid() ); */
+		execvp(commandArgs[0], commandArgs);
+		perror("EXECVP ERROR");
+		exit(3);
+	} else if (pid < 0){
+		/* ERROR FORKING */
+		fprintf(stderr, "Forking error: %s\n", strerror(errno) );
+		exit(1);
+	
+	} else {
+		/* Parent Process */
+		if(isThereAnAnd ==0){
+			/* no &, so we have to wait */
+			wait_pid = waitpid(pid, &status,0);
+			if( WIFEXITED(status) ){
+				/* WAITING */
+			}else {
+				/* WAIT HAD ERROR */
+				fprintf(stderr,"Wait had error: %s with child PID %d \n", strerror(errno), wait_pid);
+				exit(1);
+			}
+			fflush(stdout);
+		}else{
+			/* There was an &, don't wait! continue! */
+		}
+	}
+			
+/*--------------------Clean up memory, DESTROY EVERYTHING------------------- */
+
+	/* Free the commandArgs[] array */
+	for(i=0;i< numArgs;i++){
+		free(commandArgs[i]);
+	}
+	/* destroy the line */
+	memset(line,'\0',MAX_LINE);
+	
+	isThereAnAnd = 0; /* set back to 0 to say "no &" */
+	
+	/* Make commandArgs[] Null again */
+	for(i = 0; i < MAX_ARGS; i++){
+		commandArgs[i] = NULL;
+	}
+	/* DONT FORGET: need makefile */	
+	
+
+}
